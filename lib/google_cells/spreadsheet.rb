@@ -144,7 +144,35 @@ module GoogleCells
     def worksheets
       return @worksheets if @worksheets
       @worksheets = []
-      self.class.each_entry(worksheets_uri) do |entry|
+      update_worksheets(self.class.raw(worksheets_uri))
+    end
+
+    def create_worksheet(title, opts={})
+      xml = <<-EOS
+  <entry xmlns="http://www.w3.org/2005/Atom"
+    xmlns:gs="http://schemas.google.com/spreadsheets/2006">
+    <title>#{title}</title>
+    <gs:rowCount>#{opts[:rows] || 100}</gs:rowCount>
+    <gs:colCount>#{opts[:cols] || 26}</gs:colCount>
+  </entry>
+EOS
+      response = self.class.request(:post, self.worksheets_uri, body: xml, headers:{
+        "Content-Type" => "application/atom+xml"})
+      update_worksheets(response.body)
+      worksheets.last
+    end
+
+    def revisions
+      @revisions ||= Revision.list(self.key).map do |r|
+        r.instance_variable_set(:@spreadsheet, self)
+        r
+      end
+    end
+
+    private
+
+    def update_worksheets(doc)
+      self.class.each_entry_xml(doc) do |entry|
         args = {
           title: entry.css("title").text,
           updated_at: entry.css("updated").text,
@@ -162,15 +190,6 @@ module GoogleCells
       end
       return @worksheets
     end
-
-    def revisions
-      @revisions ||= Revision.list(self.key).map do |r|
-        r.instance_variable_set(:@spreadsheet, self)
-        r
-      end
-    end
-
-    private
 
     def self.parse_from_entry(entry, key=nil)
       url ||= entry.css("link").select{|el| el['rel'] == 'alternate'}.
